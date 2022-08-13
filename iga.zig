@@ -30,3 +30,14 @@ pub fn mbRead(comptime T: type, reader: anytype) !T {
         v = (v << 7) | (try reader.readByte());
     return v >> 1;
 }
+
+pub fn decrypt(buffer: []u8, state: *u64, xor: bool) void {
+    const offset = state.*;
+    for (buffer) |*b, i|
+        b.* ^= @truncate(u8, offset +% i +% 2);
+    if (xor)
+        for (buffer) |*b| {
+            b.* ^= 0xFF;
+        };
+    state.* = offset + buffer.len;
+}

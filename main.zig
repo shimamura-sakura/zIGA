@@ -38,17 +38,6 @@ fn entryLT(context: ?void, lhs: iga.Entry64, rhs: iga.Entry64) bool {
     return lhs.offset < rhs.offset;
 }
 
-fn decrypt(buffer: []u8, state: *u64, xor: bool) void {
-    const offset = state.*;
-    for (buffer) |*b, i|
-        b.* ^= @truncate(u8, offset +% i +% 2);
-    if (xor)
-        for (buffer) |*b| {
-            b.* ^= 0xFF;
-        };
-    state.* = offset + buffer.len;
-}
-
 pub fn main() !void {
     const argv = try std.process.argsAlloc(mem);
     defer std.process.argsFree(mem, argv);
@@ -93,7 +82,7 @@ pub fn main() !void {
             const cnt = try lim_r.readAll(&buffer);
             if (cnt == 0)
                 return error.TruncateIGA;
-            decrypt(buffer[0..cnt], &state, xor);
+            iga.decrypt(buffer[0..cnt], &state, xor);
             try outfile.writeAll(buffer[0..cnt]);
         }
         offset += ent.length;
