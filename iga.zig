@@ -1,11 +1,13 @@
 const std = @import("std");
 
 pub const IGAHdr = packed struct {
-    sig: [4]u8,
-    unk: [3][4]u8,
+    sig: u32,
+    un1: u32,
+    un2: u32,
+    un3: u32,
 
     pub fn checkSig(self: @This()) bool {
-        return std.mem.eql(u8, &self.sig, "IGA0");
+        return std.mem.eql(u8, @ptrCast([*]const u8, &self.sig)[0..4], "IGA0");
     }
 };
 

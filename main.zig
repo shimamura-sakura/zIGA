@@ -8,8 +8,12 @@ fn readEntries(reader: anytype, allocator: std.mem.Allocator) ![]iga.Entry64 {
     const rdr = lim_r.reader();
     var array = try std.ArrayList(iga.Entry64).initCapacity(allocator, len / 7);
     errdefer array.deinit();
-    while (lim_r.bytes_left > 0)
-        try array.append(try iga.Entry64.read(rdr));
+    while (lim_r.bytes_left > 0) {
+        const entry = try iga.Entry64.read(rdr);
+        std.debug.print("{}\n", .{entry});
+        try array.append(entry);
+    }
+    std.debug.print("- end of entries -\n", .{});
     // std.debug.print(
     //     "avg bytes per entry {}\n",
     //     .{@intToFloat(f64, len) / @intToFloat(f64, array.items.len)},
@@ -19,17 +23,28 @@ fn readEntries(reader: anytype, allocator: std.mem.Allocator) ![]iga.Entry64 {
 
 fn readNames(reader: anytype, allocator: std.mem.Allocator, entries: []iga.Entry64) ![]u8 {
     const len = try iga.mbRead(u64, reader);
+
+    var lim_rdr = std.io.limitedReader(reader, len);
+    const lim_r = lim_rdr.reader();
+
     var nameBuf = try std.ArrayList(u8).initCapacity(allocator, len);
     errdefer nameBuf.deinit();
     for (entries) |*ent, i| {
         const name_begin = nameBuf.items.len;
-        const filename_end = if (i + 1 < entries.len) entries[i + 1].filename_offset else len;
-        var lim_rdr = std.io.limitedReader(reader, filename_end - ent.filename_offset);
-        const lim_r = lim_rdr.reader();
-        while (lim_rdr.bytes_left > 0)
-            try nameBuf.append(try iga.mbRead(u8, lim_r));
+
+        if (i + 1 < entries.len) {
+            var n = entries[i + 1].filename_offset - ent.filename_offset;
+            while (n > 0) : (n -= 1)
+                try nameBuf.append(try iga.mbRead(u8, lim_r));
+        } else {
+            while (lim_rdr.bytes_left > 0)
+                try nameBuf.append(try iga.mbRead(u8, lim_r));
+        }
+
         ent.filename = nameBuf.items[name_begin..];
+        std.debug.print("{s}\n", .{ent.filename.?});
     }
+    std.debug.print("- end of names -\n", .{});
     return nameBuf.toOwnedSlice();
 }
 
