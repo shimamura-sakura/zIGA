@@ -29,7 +29,7 @@ fn readNames(reader: anytype, allocator: std.mem.Allocator, entries: []iga.Entry
 
     var nameBuf = try std.ArrayList(u8).initCapacity(allocator, len);
     errdefer nameBuf.deinit();
-    for (entries) |*ent, i| {
+    for (entries, 0..) |*ent, i| {
         const name_begin = nameBuf.items.len;
 
         if (i + 1 < entries.len) {
@@ -56,10 +56,12 @@ fn entryLT(context: ?void, lhs: iga.Entry64, rhs: iga.Entry64) bool {
 pub fn main() !void {
     const argv = try std.process.argsAlloc(mem);
     defer std.process.argsFree(mem, argv);
-    if (argv.len < 3)
+    if (argv.len < 3) {
+        std.debug.print("usage: ziga iga_file out_folder\n", .{});
         return error.NotEnoughArgs;
-    const xor = argv.len > 3 and std.mem.eql(u8, argv[3][0..], "xor");
-    std.debug.print("xor = {}\n", .{xor});
+    }
+    // const xor = argv.len > 3 and std.mem.eql(u8, argv[3][0..], "xor");
+    // std.debug.print("xor = {}\n", .{xor});
     const infile = try std.fs.cwd().openFileZ(argv[1], .{});
     defer infile.close();
     const r = infile.reader();
@@ -97,7 +99,7 @@ pub fn main() !void {
             const cnt = try lim_r.readAll(&buffer);
             if (cnt == 0)
                 return error.TruncateIGA;
-            iga.decrypt(buffer[0..cnt], &state, xor);
+            iga.decrypt(buffer[0..cnt], &state, std.mem.endsWith(u8, outName.items, ".s"));
             try outfile.writeAll(buffer[0..cnt]);
         }
         offset += ent.length;

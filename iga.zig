@@ -35,7 +35,7 @@ pub fn mbRead(comptime T: type, reader: anytype) !T {
 
 pub fn decrypt(buffer: []u8, state: *u64, xor: bool) void {
     const offset = state.*;
-    for (buffer) |*b, i|
+    for (buffer, 0..) |*b, i|
         b.* ^= @truncate(u8, offset +% i +% 2);
     if (xor)
         for (buffer) |*b| {
