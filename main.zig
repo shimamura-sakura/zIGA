@@ -56,12 +56,10 @@ fn entryLT(context: ?void, lhs: iga.Entry64, rhs: iga.Entry64) bool {
 pub fn main() !void {
     const argv = try std.process.argsAlloc(mem);
     defer std.process.argsFree(mem, argv);
-    if (argv.len < 3) {
-        std.debug.print("usage: ziga iga_file out_folder\n", .{});
+    if (argv.len < 3)
         return error.NotEnoughArgs;
-    }
-    // const xor = argv.len > 3 and std.mem.eql(u8, argv[3][0..], "xor");
-    // std.debug.print("xor = {}\n", .{xor});
+    const xor = argv.len > 3 and std.mem.eql(u8, argv[3][0..], "xor");
+    std.debug.print("xor = {}\n", .{xor});
     const infile = try std.fs.cwd().openFileZ(argv[1], .{});
     defer infile.close();
     const r = infile.reader();
@@ -72,7 +70,7 @@ pub fn main() !void {
     defer mem.free(entries);
     const nameBuf = try readNames(r, mem, entries);
     defer mem.free(nameBuf);
-    std.sort.sort(iga.Entry64, entries, @as(?void, null), entryLT);
+    std.sort.block(iga.Entry64, entries, @as(?void, null), entryLT);
     var offset: u64 = 0;
     var buffer: [4096]u8 = undefined;
     const outPrefix = argv[2][0..];
@@ -84,7 +82,9 @@ pub fn main() !void {
     const prefixLen = outName.items.len;
     for (entries) |ent| {
         if (offset != ent.offset) {
-            try infile.seekBy(@intCast(i64, ent.offset) -% @intCast(i64, offset));
+            const a: i64 = @intCast(ent.offset);
+            const b: i64 = @intCast(offset);
+            try infile.seekBy(a - b);
             offset = ent.offset;
         }
         try outName.resize(prefixLen);
@@ -99,7 +99,7 @@ pub fn main() !void {
             const cnt = try lim_r.readAll(&buffer);
             if (cnt == 0)
                 return error.TruncateIGA;
-            iga.decrypt(buffer[0..cnt], &state, std.mem.endsWith(u8, outName.items, ".s"));
+            iga.decrypt(buffer[0..cnt], &state, xor);
             try outfile.writeAll(buffer[0..cnt]);
         }
         offset += ent.length;

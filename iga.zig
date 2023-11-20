@@ -7,7 +7,7 @@ pub const IGAHdr = packed struct {
     un3: u32,
 
     pub fn checkSig(self: @This()) bool {
-        return std.mem.eql(u8, @ptrCast([*]const u8, &self.sig)[0..4], "IGA0");
+        return std.mem.eql(u8, @as(*const [4]u8, @ptrCast(&self.sig)), "IGA0");
     }
 };
 
@@ -36,7 +36,7 @@ pub fn mbRead(comptime T: type, reader: anytype) !T {
 pub fn decrypt(buffer: []u8, state: *u64, xor: bool) void {
     const offset = state.*;
     for (buffer, 0..) |*b, i|
-        b.* ^= @truncate(u8, offset +% i +% 2);
+        b.* ^= @as(u8, @truncate(offset +% i +% 2));
     if (xor)
         for (buffer) |*b| {
             b.* ^= 0xFF;
