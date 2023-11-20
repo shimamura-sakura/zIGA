@@ -70,7 +70,7 @@ pub fn main() !void {
     defer mem.free(entries);
     const nameBuf = try readNames(r, mem, entries);
     defer mem.free(nameBuf);
-    std.sort.block(iga.Entry64, entries, @as(?void, null), entryLT);
+    std.sort.insertion(iga.Entry64, entries, @as(?void, null), entryLT);
     var offset: u64 = 0;
     var buffer: [4096]u8 = undefined;
     const outPrefix = argv[2][0..];
