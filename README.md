@@ -1,11 +1,11 @@
 # zIGA
+
 InnocentGrey IGA format extractor in Zig language.
-
-Tested on files from Flowers Series, Kara no Shoujou (殼/虛/天)
-
 
 ## Build
 ```sh
+$ ./build.sh
+or 
 $ zig build-exe main.zig
 ```
 

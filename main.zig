@@ -1,107 +1,124 @@
 const std = @import("std");
-const iga = @import("iga.zig");
-const mem = std.heap.page_allocator;
 
-fn readEntries(reader: anytype, allocator: std.mem.Allocator) ![]iga.Entry64 {
-    const len = try iga.mbRead(u64, reader);
-    var lim_r = std.io.limitedReader(reader, len);
-    const rdr = lim_r.reader();
-    var array = try std.ArrayList(iga.Entry64).initCapacity(allocator, len / 7);
-    errdefer array.deinit();
-    while (lim_r.bytes_left > 0) {
-        const entry = try iga.Entry64.read(rdr);
-        std.debug.print("{}\n", .{entry});
-        try array.append(entry);
-    }
-    std.debug.print("- end of entries -\n", .{});
-    // std.debug.print(
-    //     "avg bytes per entry {}\n",
-    //     .{@intToFloat(f64, len) / @intToFloat(f64, array.items.len)},
-    // );
-    return array.toOwnedSlice();
+pub fn panic(_: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
+    unreachable;
 }
 
-fn readNames(reader: anytype, allocator: std.mem.Allocator, entries: []iga.Entry64) ![]u8 {
-    const len = try iga.mbRead(u64, reader);
-
-    var lim_rdr = std.io.limitedReader(reader, len);
-    const lim_r = lim_rdr.reader();
-
-    var nameBuf = try std.ArrayList(u8).initCapacity(allocator, len);
-    errdefer nameBuf.deinit();
-    for (entries, 0..) |*ent, i| {
-        const name_begin = nameBuf.items.len;
-
-        if (i + 1 < entries.len) {
-            var n = entries[i + 1].filename_offset - ent.filename_offset;
-            while (n > 0) : (n -= 1)
-                try nameBuf.append(try iga.mbRead(u8, lim_r));
-        } else {
-            while (lim_rdr.bytes_left > 0)
-                try nameBuf.append(try iga.mbRead(u8, lim_r));
-        }
-
-        ent.filename = nameBuf.items[name_begin..];
-        std.debug.print("{s}\n", .{ent.filename.?});
-    }
-    std.debug.print("- end of names -\n", .{});
-    return nameBuf.toOwnedSlice();
+fn readFileAllocZ(path: [:0]const u8, allocator: std.mem.Allocator) ![]u8 {
+    const file = try std.fs.cwd().openFileZ(path, .{});
+    defer file.close();
+    const data = try allocator.alloc(u8, @intCast(try file.getEndPos()));
+    errdefer allocator.free(data);
+    _ = try file.readAll(data);
+    return data;
 }
 
-fn entryLT(context: ?void, lhs: iga.Entry64, rhs: iga.Entry64) bool {
-    _ = context;
-    return lhs.offset < rhs.offset;
+fn Slice(comptime T: anytype) type {
+    return struct {
+        const Self = @This();
+        const Error = error{EOF};
+        left: T,
+        pub fn take(self: *Self, n: anytype) Error!@TypeOf(self.left[0..n]) {
+            if (self.left.len < n) return Error.EOF;
+            defer self.left = self.left[n..];
+            return self.left[0..n];
+        }
+        pub fn byte(self: *Self) Error!u8 {
+            if (self.left.len < 1) return Error.EOF;
+            defer self.left = self.left[1..];
+            return self.left[0];
+        }
+        pub fn vlq(self: *Self, comptime I: type) Error!I {
+            var v: I = 0;
+            while ((v & 1) == 0) v = (v << 7) | (try self.byte());
+            return v >> 1;
+        }
+    };
 }
 
-pub fn main() !void {
-    const argv = try std.process.argsAlloc(mem);
-    defer std.process.argsFree(mem, argv);
-    if (argv.len < 3)
-        return error.NotEnoughArgs;
-    const xor = argv.len > 3 and std.mem.eql(u8, argv[3][0..], "xor");
-    std.debug.print("xor = {}\n", .{xor});
-    const infile = try std.fs.cwd().openFileZ(argv[1], .{});
-    defer infile.close();
-    const r = infile.reader();
-    const hdr = try r.readStruct(iga.IGAHdr);
-    if (hdr.checkSig() == false)
-        return error.InvalidSig;
-    const entries = try readEntries(r, mem);
-    defer mem.free(entries);
-    const nameBuf = try readNames(r, mem, entries);
-    defer mem.free(nameBuf);
-    std.sort.insertion(iga.Entry64, entries, @as(?void, null), entryLT);
-    var offset: u64 = 0;
-    var buffer: [4096]u8 = undefined;
-    const outPrefix = argv[2][0..];
-    var outName = try std.ArrayList(u8).initCapacity(mem, outPrefix.len + 32);
-    defer outName.deinit();
-    try outName.appendSlice(outPrefix);
-    if (outName.items.len > 0 and outName.items[outName.items.len - 1] != '/')
-        try outName.append('/');
-    const prefixLen = outName.items.len;
-    for (entries) |ent| {
-        if (offset != ent.offset) {
-            const a: i64 = @intCast(ent.offset);
-            const b: i64 = @intCast(offset);
-            try infile.seekBy(a - b);
-            offset = ent.offset;
-        }
-        try outName.resize(prefixLen);
-        try outName.appendSlice(ent.filename.?);
-        std.debug.print("-> {s}\n", .{outName.items});
-        const outfile = try std.fs.cwd().createFile(outName.items, .{});
-        defer outfile.close();
-        var state: u64 = 0;
-        var lim_rdr = std.io.limitedReader(r, ent.length);
-        const lim_r = lim_rdr.reader();
-        while (lim_rdr.bytes_left > 0) {
-            const cnt = try lim_r.readAll(&buffer);
-            if (cnt == 0)
-                return error.TruncateIGA;
-            iga.decrypt(buffer[0..cnt], &state, xor);
-            try outfile.writeAll(buffer[0..cnt]);
-        }
-        offset += ent.length;
+fn decryptData(buffer: []u8, xor: bool) []u8 {
+    for (buffer, 2..) |*b, i|
+        b.* ^= @as(u8, @truncate(i));
+    if (xor) {
+        for (buffer) |*b| b.* ^= 0xFF;
     }
+    return buffer;
+}
+
+pub fn main() u8 {
+    return xmain() catch 255;
+}
+
+/// File:
+/// - iga0: [4]u8 == "IGA0"
+/// - unks: [3]u32
+/// - ent_len: vlq_int
+/// - entries: []Entry (as [ent_len]u8)
+/// - str_len: vlq_int
+/// - strings: [str_len]vlq_int
+/// Entry:
+/// - nameoff: vlq_int
+/// - offset : vlq_int
+/// - length : vlq_int
+fn xmain() anyerror!u8 {
+    const stdout = std.io.getStdOut().writer();
+    // 0. get args
+    const alloc = std.heap.page_allocator;
+    const argv = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, argv);
+    if (argv.len < 3) {
+        stdout.print("usage: program iga_file out_dir [\"xor\"]\n", .{}) catch {};
+        return 1; // error.NotEnoughArgs
+    }
+    const xor = argv.len > 3 and std.mem.eql(u8, argv[3], "xor");
+
+    // 1. open dir
+    var dir = try std.fs.cwd().makeOpenPath(argv[2], .{});
+    defer dir.close();
+
+    // 2. load file
+    const bytes = try readFileAllocZ(argv[1], alloc);
+    defer alloc.free(bytes);
+    var slice = Slice([]u8){ .left = bytes };
+
+    // 3. load sections
+    if (!std.mem.eql(u8, "IGA0", (try slice.take(16))[0..4])) return 2; // error.NotIGA0
+    const s_entries = try slice.take(try slice.vlq(usize));
+    const s_strings = try slice.take(try slice.vlq(usize));
+    const s_filedat = slice.left;
+
+    // 4. decrypt strings
+    var l_strings: usize = 0;
+    var s_slice = Slice([]u8){ .left = s_strings };
+    for (s_strings) |*b| {
+        b.* = try s_slice.vlq(u8);
+        l_strings += 1;
+        if (s_slice.left.len == 0) break;
+    }
+
+    // 5. read entries
+    var e_slice = Slice([]u8){ .left = s_entries };
+    if (e_slice.left.len > 0) {
+        var prev_noff = try e_slice.vlq(usize);
+        var prev_offs = try e_slice.vlq(usize);
+        var prev_size = try e_slice.vlq(usize);
+        while (e_slice.left.len > 0) {
+            const noff = try e_slice.vlq(usize);
+            const offs = try e_slice.vlq(usize);
+            const size = try e_slice.vlq(usize);
+            const name = s_strings[prev_noff..noff];
+            const data = decryptData(s_filedat[prev_offs..][0..prev_size], xor);
+            stdout.print("{s} {}\n", .{ name, data.len }) catch {};
+            try dir.writeFile(name, data);
+            prev_noff = noff;
+            prev_offs = offs;
+            prev_size = size;
+        }
+        const name = s_strings[prev_noff..l_strings];
+        const data = decryptData(s_filedat[prev_offs..][0..prev_size], xor);
+        stdout.print("{s} {}\n", .{ name, data.len }) catch {};
+        try dir.writeFile(name, data);
+    }
+
+    return 0;
 }
