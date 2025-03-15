@@ -20,6 +20,7 @@ will automatically apply XOR to script files (.s)
 
 Examples:
 ```sh
+$ ./main bgm.iga # list files
 $ ./main bgm.iga ./bgm
 $ ./main script.iga ./script
 ```
